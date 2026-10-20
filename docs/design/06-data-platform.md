@@ -62,6 +62,7 @@ spec:
       encoding: UTF8
       localeProvider: icu
       icuLocale: und
+      localeCType: en_US.UTF-8   # Unicode-aware LC_CTYPE for pg_trgm; verify with show_trgm('哈利波特'), see ADR 0008
       secret: { name: pg-inventory-app }
   managed:
     roles:
@@ -86,7 +87,7 @@ spec: { cluster: { name: pg-main }, name: keycloak, owner: keycloak }
 
 ### 3.2 Notes
 
-- **ICU locale (`und`) is required** for inventory search: it lets `pg_trgm` treat CJK characters as word characters (02 §5.3). It must be set at `initdb`; changing it later means dump and restore.
+- **A Unicode‑aware `LC_CTYPE` is required** for inventory search: `pg_trgm` classifies characters with the libc ctype, even when ICU is the locale provider, and ignores CJK characters under `C` (02 §5.3, [ADR 0008](../adr/261020-keep-pg-trgm-and-fts-for-search.md)). Set `localeCType` explicitly at `initdb` together with the ICU settings; changing it later means dump and restore. Verify on the bootstrapped cluster: `show lc_ctype` and `select show_trgm('哈利波特')` must return CJK trigrams.
 - `pg_trgm` is created by inventory's Flyway migration (trusted extension; no superuser).
 - Services connect to `pg-main-rw` (primary). No read replicas used by apps in v1.
 - `inventory_app` and `keycloak` cannot connect to each other's database: `REVOKE CONNECT ON DATABASE … FROM PUBLIC` for both, granted only to the owner (run in a `postInitApplicationSQL` / a one‑time Job).
@@ -156,7 +157,7 @@ Two independent StatefulSets from one small in‑repo chart (`platform/charts/re
 
 | Value | `redis-sessions` | `redis-cache` |
 | --- | --- | --- |
-| Image | `redis:8` (official) | same |
+| Image | `valkey/valkey:8` (official Valkey image, minor pinned in overlays) | same |
 | Replicas | 1 | 1 |
 | `maxmemory` | 512mb | 1gb |
 | `maxmemory-policy` | `noeviction` | `allkeys-lru` |
@@ -168,12 +169,12 @@ Two independent StatefulSets from one small in‑repo chart (`platform/charts/re
 
 - ACL file rendered from a Secret (passwords from ESO), mounted at `/etc/redis/users.acl`.
 - `protected-mode yes`, `rename-command` not used (ACLs instead). `-@dangerous` blocks `FLUSHALL`, `KEYS`, `CONFIG` and similar; `SCAN` (used for cache eviction by prefix, 02 §5.4) is not in that category. Because `CONFIG` is blocked, the gateway must not let Spring Session try to configure keyspace notifications: use the default (non‑indexed) reactive session repository and, if any configuration action is attempted, register `ConfigureReactiveRedisAction.NO_OP`.
-- Licensing: ARCH §6.3 asks for a legal check on Redis 8's AGPLv3/RSALv2/SSPL options. Valkey is a BSD‑licensed, protocol‑compatible alternative that would remove the question; the charts work with either image (P‑10).
+- Licensing: the instances run **Valkey 8** (BSD‑3, Linux Foundation), a protocol‑compatible fork of Redis 7.2.4, so the Redis 8 licence review (ARCH §6.3) is no longer needed ([ADR 0017](../adr/261020-use-valkey-for-sessions-and-cache.md), supersedes ADR 0009). Instance names, ACL users and `REDIS_*` env vars are unchanged; the apps use Spring Data Redis as before (P‑10).
 - HA criteria and the upgrade path to Sentinel/ElastiCache: ARCH §6.3, unchanged.
 
 ## 7. Object storage
 
-- **Garage** (P‑11) as the in‑cluster S3‑compatible store: 3 nodes as a StatefulSet, replication factor 3, PVC 20Gi each. If the cluster already runs Rook/Ceph, use Ceph RGW instead and skip Garage.
+- **Garage** ([ADR 0010](../adr/261020-use-garage-for-object-storage.md)) as the in‑cluster S3‑compatible store: 3 nodes as a StatefulSet, replication factor 3, PVC 20Gi each. If the cluster already runs Rook/Ceph, use Ceph RGW instead and skip Garage.
 - Bucket `bookstore-covers`, private (no anonymous read; covers are served through inventory, ARCH §3.1).
 - Key `inventory-covers` with read/write on that bucket only; credentials in Secret `s3-inventory`.
 - Garage's region name (`garage` by default) → inventory `S3_REGION`; `S3_PATH_STYLE=true`.
@@ -319,8 +320,8 @@ Grafana dashboards: import the upstream dashboards for CNPG, RabbitMQ, Redis exp
 | P‑07 | Operator default TLS for Mongo intra‑cluster | Configure certificates via cert‑manager |
 | P‑08 | RabbitMQ 4.1 | Any 4.x; quorum queue settings unchanged |
 | P‑09 | In‑repo minimal Redis chart rather than a third‑party chart | Use your org's standard chart |
-| P‑10 | Redis 8 official image pending legal review; Valkey is the fallback | Swap image; no app change |
-| P‑11 | Garage as object store (Ceph RGW if Rook already runs) | SeaweedFS works too; only endpoint/credentials change |
+| P‑10 | **Decided 2026‑10‑20 — [ADR 0017](../adr/261020-use-valkey-for-sessions-and-cache.md)** (supersedes ADR 0009). Valkey 8 official image for both instances; no licence review needed. Was: Redis 8 official image pending legal review; Valkey is the fallback | Swap image; no app change |
+| P‑11 | **Decided 2026‑10‑20 — [ADR 0010](../adr/261020-use-garage-for-object-storage.md).** Garage as object store (Ceph RGW if Rook already runs) | SeaweedFS works too; only endpoint/credentials change |
 | P‑12 | Reloader (or similar) restarts pods on Secret change | Manual rollout after rotation |
 | P‑13 | CI updates image tags in overlays via PR | Argo CD Image Updater |
 | P‑14 | Sizes and storage in this doc are starting points | Tune with real data volume |

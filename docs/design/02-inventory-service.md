@@ -565,8 +565,8 @@ Integration tests (Testcontainers PostgreSQL, RabbitMQ, Redis, an S3‑compatibl
 | --- | --- | --- |
 | I‑01 | ISBN‑10 input accepted and converted to ISBN‑13 | Reject ISBN‑10: simpler validator |
 | I‑02 | Books soft‑deleted (restorable); authors hard‑deleted and only when unused | Hard delete books: drop `deleted_at`, partial indexes become plain |
-| I‑03 | Scheduled outbox relay rather than Spring Modulith | Replace §5.2 with Modulith event publication registry + AMQP externalization |
-| I‑04 | Titles/authors mixed Traditional Chinese and English; trigram + `simple` FTS is good enough | If search quality matters more, plan the dedicated search engine (ARCH §7) earlier, or evaluate `pg_bigm` |
+| I‑03 | **Decided 2026‑10‑20 — [ADR 0007](../adr/261020-use-hand-written-outbox-relay.md).** Scheduled outbox relay rather than Spring Modulith | Replace §5.2 with Modulith event publication registry + AMQP externalization |
+| I‑04 | **Decided 2026‑10‑20 — [ADR 0008](../adr/261020-keep-pg-trgm-and-fts-for-search.md).**  Requires an explicit Unicode‑aware `LC_CTYPE` at initdb (06 §3.1). Titles/authors mixed Traditional Chinese and English; trigram + `simple` FTS is good enough | If search quality matters more, plan the dedicated search engine (ARCH §7) earlier, or evaluate `pg_bigm` |
 | I‑05 | Covers: JPEG/PNG/WebP, ≤ 5 MB, ≤ 4000 px, stored as uploaded, no resizing, no EXIF stripping | Add an image‑processing step before upload (resize, re‑encode, strip metadata) |
 | I‑06 | Flyway runs as the app's owner role | Separate migration Job with a privileged role |
 | I‑07 | Sizing: pool 20, 2–6 replicas, 500m/768Mi requests | Tune after load test |

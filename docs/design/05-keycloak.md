@@ -19,7 +19,7 @@
 
 **Non‑goals (v1)**
 
-- Social login, MFA requirement, passkeys (K‑05).
+- Social login, MFA for customers, passkeys (K‑05). Users with `ADMIN` must use OTP ([ADR 0006](../adr/261020-require-otp-for-admin-users.md)).
 - Fine‑grained admin permissions.
 - Exposing the Keycloak admin console publicly.
 
@@ -53,6 +53,7 @@ All of the following is declared in `identity/keycloak/realm/bookstore.yaml` and
 | `resetPasswordAllowed` | true |
 | `rememberMe` | true (sign‑in mock‑up; K‑09) |
 | `editUsernameAllowed` | false |
+| Browser flow | `bookstore browser`: copy of `browser`; after username/password a conditional sub‑flow `Condition – user role` = `ADMIN` → `OTP Form` (REQUIRED); users without OTP get `CONFIGURE_TOTP`. Theme `login-otp.ftl` and `login-config-totp.ftl` ([ADR 0006](../adr/261020-require-otp-for-admin-users.md)) |
 | `bruteForceProtected` | true; `failureFactor` 5, `waitIncrementSeconds` 60, `maxFailureWaitSeconds` 900, `maxDeltaTimeSeconds` 43200 |
 | Password policy | `length(12) and notUsername and notEmail and passwordHistory(3)` (K‑02) |
 | `sslRequired` | `external` |
@@ -303,11 +304,11 @@ Env for keycloak-config-cli job (consumed as `$(env:NAME)` in realm YAML):
 | K‑01 | Email verification required; an SMTP relay is available | Turn off `verifyEmail`; invites need another delivery path |
 | K‑02 | Password policy length ≥ 12, history 3 | Align with your company policy |
 | K‑03 | `view-users` + `query-users` + `manage-users` are enough to assign realm roles | Add the minimum extra role found by the test in §11 |
-| K‑04 | keycloak-config-cli for realm config | Use Terraform's Keycloak provider instead; same content |
-| K‑05 | No social login or MFA for customers in v1 | Add identity providers / OTP required action |
+| K‑04 | **Decided 2026‑10‑20 — [ADR 0004](../adr/261020-manage-keycloak-realm-with-config-cli.md).** keycloak-config-cli for realm config | Use Terraform's Keycloak provider instead; same content |
+| K‑05 | **Decided 2026‑10‑20 — [ADR 0006](../adr/261020-require-otp-for-admin-users.md).** No social login or MFA for customers in v1; **OTP required for `ADMIN`** (§3.1) | Add identity providers / OTP required action |
 | K‑06 | Admin console only via port‑forward or VPN‑only host | Define the internal host |
 | K‑07 | Human Keycloak admins use the `master` realm with MFA | |
-| K‑08 | Keycloak on its own subdomain `auth.bookstore.example` | Path‑based (`/auth` on the shop host) changes `hostname`, ingress and the CSP `form-action` |
+| K‑08 | **Decided 2026‑10‑20 — [ADR 0005](../adr/261020-host-keycloak-on-auth-subdomain.md).** Keycloak on its own subdomain `auth.bookstore.example` | Path‑based (`/auth` on the shop host) changes `hostname`, ingress and the CSP `form-action` |
 | K‑09 | 記住我 enabled with 7 d idle / 30 d max | Set `rememberMe: false` and remove the checkbox from `login.ftl` |
 | K‑10 | Terms acceptance via Keycloak's Terms and conditions registration action; the terms text lives on the shop's `/terms` | Use a required user‑profile attribute instead |
 | K‑11 | Custom `template.ftl` on `base` (not PatternFly `keycloak.v2`) to match the mock‑ups | Use Keycloakify or keep `keycloak.v2` with CSS overrides only (closer to stock look) |

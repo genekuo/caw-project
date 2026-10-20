@@ -360,8 +360,12 @@ Every admin write (create, update, delete, cover change, role change, account cr
 | `entityId` | string | |
 | `changes` | JSON | `{ "<field>": { "old": …, "new": … } }`; `null` values allowed; for `CREATE` all fields have `old: null` |
 | `traceId` | string | |
+| `outcome` | enum, optional | User service only: `PENDING`, `SUCCEEDED`, `FAILED` ([ADR 0016](../adr/261020-use-pending-then-confirm-user-audit.md)). Absent for inventory, whose audit shares the change's transaction |
+| `correlationId` | UUID, optional | User service only: on outcome records, the `id` of the `PENDING` intent record |
 
 Audit records are never updated or deleted by application code. Retention: indefinite in v1 (A‑07).
+
+Records with `entityType = USER` never contain the subject user's personal data: `changes` is limited to an allow-list (`roles`, `enabled`, `sendInvite`, `inviteSent`, required-action names) and `entityId` is the Keycloak `sub` ([ADR 0015](../adr/261020-keep-pii-out-of-user-audit-records.md)). `actorUsername` (the acting admin) is kept.
 
 ## 7. Configuration conventions
 
@@ -464,4 +468,4 @@ Adding a genre is a contract change: update the enum, the Flyway CHECK constrain
 | A‑08 | Fixed genre list above | Replace list; if genres must be admin‑managed, they become an inventory entity with its own API |
 | A‑09 | Design docs written in English, UI default language zh‑TW (see 04) | Translate docs; UI default changes in one config value |
 | A‑10 | Public host `shop.bookstore.example`, identity host `auth.bookstore.example` | Placeholders; replace in overlays |
-| A‑11 | Catalog tables use offset paging with totals (UI paginator); catalog stays well under 100k books (02 I‑08) | Return to keyset `nextCursor` only and drop totals from the UI |
+| A‑11 | **Decided 2026‑10‑20 — [ADR 0002](../adr/261020-use-offset-paging-for-catalog-tables.md).** Catalog tables use offset paging with totals (UI paginator); catalog stays well under 100k books (02 I‑08) | Return to keyset `nextCursor` only and drop totals from the UI |

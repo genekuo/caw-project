@@ -26,7 +26,7 @@ The gateway is the only workload reachable from the ingress. It is a Spring Clou
 
 **Non‑goals (v1)**
 
-- Rate limiting (G‑06).
+- Application‑level rate limiting; per‑IP limits are applied at the ingress ([ADR 0012](../adr/261020-rate-limit-at-the-ingress.md)).
 - Response caching.
 - Any business logic or response transformation.
 - CORS (everything is same‑origin).
@@ -199,10 +199,9 @@ Every request through the gateway touches the session, including public catalog 
 - The reactive gateway streams by default. Do not apply filters that read or modify the response body on `catalog-stream`.
 - Route metadata `response-timeout: -1` disables the gateway's response timeout for this route. Global `spring.cloud.gateway.server.webflux.httpclient.response-timeout: 30s` applies to everything else; `connect-timeout: 2000`.
 - Netty HTTP client pool: `max-connections` 10000 for the inventory upstream (matches inventory's SSE capacity, 02 §5.6), `max-idle-time` 60 s, `pending-acquire-timeout` 5 s.
-- Ingress settings for `/api/catalog/stream` (G‑04, ingress assumed to be Apache APISIX):
+- Ingress settings for `/api/catalog/stream` (Apache APISIX, [ADR 0011](../adr/261020-use-apisix-as-ingress-controller.md)):
   - route timeout `read: 3600`, `send: 60`, `connect: 5` seconds;
   - response buffering off: the upstream sends `X-Accel-Buffering: no`, which nginx‑based proxies honour; also verify that no response‑rewriting plugin is enabled on the route.
-  - For ingress‑nginx instead: `nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"`, `proxy-buffering: "off"` on a separate Ingress for that path.
 
 ### 5.7 Security headers
 
@@ -215,9 +214,12 @@ Added by a global filter on every response (unless an upstream already set the h
 | `X-Frame-Options` | `DENY` |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` |
 | `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` |
-| `Content-Security-Policy-Report-Only` | `default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; form-action 'self' https://auth.bookstore.example` |
+| `Content-Security-Policy-Report-Only` | `default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; form-action 'self' https://auth.bookstore.example; report-uri /bff/csp-report; report-to csp` |
+| `Reporting-Endpoints` | `csp="/bff/csp-report"` |
 
-CSP starts as report‑only (G‑05) because Angular SSR's inline event‑replay script needs a nonce; the frontend doc (04 §6) covers nonce support. Switch to enforcing once reports are clean.
+CSP starts as report‑only because Angular SSR's inline event‑replay script needs a nonce; the frontend doc (04 §6) covers nonce support. Two weeks after go‑live, if the dashboard shows no first‑party violations for 7 days, switch to the enforcing `Content-Security-Policy` header and keep the report‑only header for tightening ([ADR 0013](../adr/261020-ship-csp-report-only-then-enforce.md)).
+
+**`POST /bff/csp-report`** (local endpoint, `permitAll`, CSRF‑exempt, body ≤ 8 KB, rate‑limited at the ingress): accepts `application/csp-report` and `application/reports+json`, logs one structured line `csp.violation` (directive, blocked URI, document URI without query), increments `bookstore.csp.violations{directive}`, returns 204. Never echoes input.
 
 ### 5.8 Requests from SSR
 
@@ -319,11 +321,11 @@ Integration tests with Testcontainers Keycloak (realm from 05), Redis, and WireM
 
 | ID | Assumption | If wrong |
 | --- | --- | --- |
-| G‑01 | WebFlux variant of Spring Cloud Gateway | MVC variant: `TokenRelay` and session config differ; SSE pass‑through needs careful thread sizing |
-| G‑02 | JSON session serialization | JDK serialization is simpler but breaks sessions on class changes |
+| G‑01 | **Decided 2026‑10‑20 — [ADR 0001](../adr/261020-use-bff-gateway-with-server-side-tokens.md).** WebFlux variant of Spring Cloud Gateway | MVC variant: `TokenRelay` and session config differ; SSE pass‑through needs careful thread sizing |
+| G‑02 | **Decided 2026‑10‑20 — [ADR 0001](../adr/261020-use-bff-gateway-with-server-side-tokens.md).** JSON session serialization | JDK serialization is simpler but breaks sessions on class changes |
 | G‑03 | Gateway can reach the public Keycloak URL for discovery | Configure endpoints explicitly (§5.1) |
-| G‑04 | Existing ingress is Apache APISIX | Use the ingress‑nginx annotations in §5.6, or the equivalent for your controller |
-| G‑05 | CSP report‑only at launch | Enforce from day one once nonce support is done |
-| G‑06 | No rate limiting in v1 | Add `RequestRateLimiter`; it needs a Redis — do not use `redis-sessions` for it |
+| G‑04 | **Decided 2026‑10‑20 — [ADR 0011](../adr/261020-use-apisix-as-ingress-controller.md).** Existing ingress is Apache APISIX | Use the equivalent timeout/buffering settings for your controller (not ingress‑nginx: retired upstream in March 2026) |
+| G‑05 | **Decided 2026‑10‑20 — [ADR 0013](../adr/261020-ship-csp-report-only-then-enforce.md).** CSP report‑only at launch with `/bff/csp-report`; enforce two weeks after go‑live if no first‑party violations in the last 7 days. Was: CSP report‑only at launch | Enforce from day one once nonce support is done |
+| G‑06 | **Decided 2026‑10‑20 — [ADR 0012](../adr/261020-rate-limit-at-the-ingress.md).** Per‑IP rate limiting at the APISIX ingress; no app‑level limiter. Was: No rate limiting in v1 | Add `RequestRateLimiter`; it needs a Redis — do not use `redis-sessions` for it |
 | G‑07 | Sizing in §8 | Tune after load test |
 | G‑08 | `/bff/session` and `/bff/login` are new endpoints not in ARCH §3.2 | Frontend would need another way to learn login state and roles |

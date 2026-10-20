@@ -299,10 +299,11 @@ Implemented in the Keycloak login theme, see 05 §5.3. The app's only part is th
 - Search table with offset paging (03 §3.3), same table/paginator styling as the catalog.
 - Create form: email, 名, 姓, roles (USER fixed on, ADMIN checkbox), 寄送邀請信 (default on). Show `inviteSent: false` result as a warning.
 - Detail: roles editor (ADMIN toggle), enable/disable switch, 寄送重設密碼信 button. Disable own account / remove own admin is prevented in the UI and by the server (409 messages displayed as is).
+- 刪除帳戶 (delete account, on a customer's request, [ADR 0014](../adr/261020-add-admin-run-account-deletion.md)): confirm dialog that requires typing the user's email; `DELETE /api/admin/users/{id}`; on 204 navigate back to the list with snackbar 帳戶已刪除.
 
 ### 5.9 Audit viewer
 
-Two tabs (書籍目錄, 使用者). Filters: entity ID, actor, date range. Each row expands to show `changes` as a field/old/new table.
+Two tabs (書籍目錄, 使用者). Filters: entity ID, actor, date range. Each row expands to show `changes` as a field/old/new table. User‑service rows pair intent and outcome records by `correlationId` and show the outcome (成功 / 失敗 / 結果未確認); user email and name are looked up live by `entityId`, deleted users show as 已刪除的使用者 ([ADR 0016](../adr/261020-use-pending-then-confirm-user-audit.md), [ADR 0015](../adr/261020-keep-pii-out-of-user-audit-records.md)).
 
 ## 6. Security
 
@@ -386,7 +387,7 @@ Runtime configuration for the SSR server (env vars). The browser bundle needs no
 | F‑01 | zh‑TW only in v1 (mock‑ups' English copy is placeholder), strings marked for i18n | Add `en` build and locale routing (`/en/...`) in gateway and SSR |
 | F‑02 | Zoneless change detection | Add `zone.js` back; no other changes |
 | F‑03 | Angular Material (M3, indigo) as UI kit, per mock‑ups | Swap for your design system; screens in §3.5 stay the same |
-| F‑04 | Offset paging with totals for the catalog (paginator in mock‑ups) | Keyset "next page" only: drop totals and page‑size control |
+| F‑04 | **Decided 2026‑10‑20 — [ADR 0002](../adr/261020-use-offset-paging-for-catalog-tables.md).** Offset paging with totals for the catalog (paginator in mock‑ups) | Keyset "next page" only: drop totals and page‑size control |
 | F‑05 | Close SSE after 5 min in a hidden tab | Keep it open; costs one connection per idle tab |
 | F‑06 | No sitemap in v1 | Add `/sitemap.xml` Express route walking the catalog API |
 | F‑07 | TW county/city list in the frontend; no district list | Add full district data |

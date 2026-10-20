@@ -33,7 +33,7 @@
 
 - Self‑service account deletion (U‑04).
 - Admin editing of a customer's profile fields.
-- Hard deletion of Keycloak users from the app (disable instead).
+- Self‑initiated hard deletion. Admins delete accounts on request via `DELETE /admin/users/{id}` ([ADR 0014](../adr/261020-add-admin-run-account-deletion.md)).
 - Syncing Keycloak changes into MongoDB (nothing is duplicated, so nothing to sync).
 
 ## 2. Context
@@ -119,6 +119,7 @@ Response `200` with the same shape as `GET /users/me` and the new ETag. `distric
 | `PUT /admin/users/{id}/roles` | `{ "roles": ["USER","ADMIN"] }` | 200 `AdminUserDetail` | Replaces the user's app roles; §5.4 |
 | `PUT /admin/users/{id}/enabled` | `{ "enabled": false }` | 200 `AdminUserDetail` | Disabling also logs out the user's sessions (§5.4) |
 | `POST /admin/users/{id}/password-reset` | — | 202 | Sends Keycloak `UPDATE_PASSWORD` action email |
+| `DELETE /admin/users/{id}` | — | 204 | Deletes the Keycloak user and the profile; §5.6. Idempotent (404 from Keycloak counts as done) |
 | `GET /admin/users/audit?entityId=&actorSub=&limit=&cursor=` | — | 200 keyset page of audit records | |
 
 No `If-Match` on admin endpoints: Keycloak's API has no version token to check against (U‑05). Role changes are a replace, so the last writer wins, and every change is audited.
@@ -227,9 +228,11 @@ Profile updates by the user are not audited (audit covers admin actions only). T
 3. Assign realm roles: `GET /admin/realms/bookstore/roles/{name}` for each requested role (cache role representations for 10 min), then `POST /admin/realms/bookstore/users/{id}/role-mappings/realm` with the list. `USER` is also in the realm's default roles; adding it explicitly is harmless.
 4. If `sendInvite`: `PUT /admin/realms/bookstore/users/{id}/execute-actions-email?lifespan=259200` (72 h) with `["VERIFY_EMAIL","UPDATE_PASSWORD"]` and `client_id=bookstore-gateway&redirect_uri=https://shop.bookstore.example/`.
 5. Create the profile document with `displayName = firstName` (as §5.1 but with that value).
-6. Insert audit record `CREATE` with `changes` = `{ email, firstName, lastName, roles, sendInvite }`.
+6. Insert the outcome audit record `CREATE` (`SUCCEEDED`, `correlationId` = intent record) with `changes` = `{ roles, sendInvite, inviteSent }`. No email or name in audit ([ADR 0015](../adr/261020-keep-pii-out-of-user-audit-records.md)).
 
-Compensation: if step 3 fails, `DELETE` the Keycloak user and return 502 `keycloak-error`. If step 4 fails (SMTP problems), keep the user, add `"inviteSent": false` to the response and log WARN; the admin can trigger `password-reset` later. Steps 5–6 failing after Keycloak succeeded → return 201 anyway, log ERROR with the user ID, count `bookstore.user.audit.failures`; the profile is created lazily later. Audit loss in this narrow case is accepted (U‑07).
+Before step 1, insert the intent audit record (`outcome: PENDING`). If that insert fails, return 503 `dependency-unavailable` and do not call Keycloak ([ADR 0016](../adr/261020-use-pending-then-confirm-user-audit.md)). The same intent/outcome pair wraps every admin action in §5.4 and §5.6.
+
+Compensation: if step 3 fails, `DELETE` the Keycloak user and return 502 `keycloak-error`. If step 4 fails (SMTP problems), keep the user, add `"inviteSent": false` to the response and log WARN; the admin can trigger `password-reset` later. Steps 5–6 failing after Keycloak succeeded → return 201 anyway, log ERROR with the user ID, count `bookstore.user.audit.unconfirmed`; the profile is created lazily later. The `PENDING` intent record remains and the audit viewer shows the action as 結果未確認; an alert fires if an intent record has no outcome after 5 min.
 
 ### 5.4 Roles, enable/disable, password reset
 
@@ -245,7 +248,7 @@ Disable: `PUT /users/{id}` with `{ enabled: false }`, then `POST /users/{id}/log
 
 Password reset: `execute-actions-email` with `["UPDATE_PASSWORD"]`, lifespan 24 h. Audit `PASSWORD_RESET_SENT`.
 
-Changes to a user's roles take effect at their next token refresh (≤ 5 min) or next login.
+Changes to a user's roles take effect at their next token refresh (≤ 5 min) or next login. **Exception:** granting `ADMIN` also calls `POST /users/{id}/logout`, so the user must sign in again and enrol OTP ([ADR 0006](../adr/261020-require-otp-for-admin-users.md)). `POST /admin/users` with `ADMIN` in `roles` adds the `CONFIGURE_TOTP` required action.
 
 ### 5.5 Keycloak Admin API client
 
@@ -267,6 +270,10 @@ spring.security.oauth2.client:
 - Retries: GETs retried once on connect failure or 5xx; writes never retried automatically.
 - Map Keycloak responses: 404 → 404 `user-not-found`; 409 → 409 `user-exists`; 401/403 → 502 `keycloak-error` and log ERROR (service account misconfigured); connect failure/5xx → 503 `keycloak-unavailable`.
 - DTOs for the subset of `UserRepresentation` and `RoleRepresentation` fields used. Ignore unknown fields.
+
+### 5.6 Delete user (admin, on request)
+
+Per [ADR 0014](../adr/261020-add-admin-run-account-deletion.md). Guards as in §5.4 (`cannot-modify-self`, `last-admin`). Sequence: intent audit `DELETE` (`PENDING`, `changes: null`) → `POST /users/{id}/logout` → `DELETE /users/{id}` (404 = already deleted) → delete the `profiles` document → outcome audit. Steps are idempotent; a failed run can be repeated. Backups are not edited: deleted data ages out with the 30‑day backup retention, and a restore must re‑apply `DELETE` actions recorded in the audit log since the backup.
 
 ## 6. Security
 
@@ -341,11 +348,11 @@ Integration tests with Testcontainers MongoDB (replica set mode) and Keycloak (r
 | U‑01 | Customers edit first/last name in the app (write‑through, §5.2); email and password in Keycloak's Account Console (linked from the app) | Name back to Account Console only: drop `firstName`/`lastName` from `PUT /users/me` |
 | U‑02 | Admins edit identity fields of existing users in the Keycloak admin console, not in the app | Add an admin identity edit endpoint |
 | U‑03 | Admins cannot edit customer profile fields | Add `PUT /admin/users/{id}/profile` with audit |
-| U‑04 | No self‑service account deletion in v1 | Needs a deletion flow (Keycloak delete + profile delete + audit) and a data‑retention decision |
+| U‑04 | **Decided 2026‑10‑20 — [ADR 0014](../adr/261020-add-admin-run-account-deletion.md).** Admin‑run deletion on request (`DELETE /admin/users/{id}`, §5.6); no self‑service deletion in v1. Was: No self‑service account deletion in v1 | Needs a deletion flow (Keycloak delete + profile delete + audit) and a data‑retention decision |
 | U‑05 | No optimistic locking on admin Keycloak operations | Use Keycloak user attributes as a version stamp |
 | U‑06 | Collection validator created by the app at startup | Use Mongock for versioned migrations |
-| U‑07 | Audit may be lost if Mongo fails right after a successful Keycloak write | Write a pending audit record first, then confirm it |
-| U‑08 | `RestClient` instead of `keycloak-admin-client` (deviation from ARCH §3.1) | Use the library; verify it works with Boot 4 / Jackson 3 first |
+| U‑07 | **Decided 2026‑10‑20 — [ADR 0016](../adr/261020-use-pending-then-confirm-user-audit.md).** Pending‑then‑confirm audit records (§5.3, §5.4). Was: Audit may be lost if Mongo fails right after a successful Keycloak write | Write a pending audit record first, then confirm it |
+| U‑08 | **Decided 2026‑10‑20 — [ADR 0003](../adr/261020-use-restclient-for-keycloak-admin-api.md).** `RestClient` instead of `keycloak-admin-client` (deviation from ARCH §3.1) | Use the library; verify it works with Boot 4 / Jackson 3 first |
 | U‑09 | Address format supports international addresses, TW default | Restrict to TW only and simplify validation |
 | U‑10 | Optional address on the registration form travels via transient Keycloak user attributes and is moved into the profile on first use | Drop address from registration (mock‑up change) and remove §5.1 seeding |
 | U‑11 | `manage-users` lets the service account update first/last name and user attributes | Add the minimum role found by test 2a/2b and record it in 05 |
