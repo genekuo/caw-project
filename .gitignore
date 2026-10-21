@@ -1,0 +1,57 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# IDEs and editors
+.idea/
+*.iml
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+*~
+
+# Claude Code / oh-my-claudecode local state
+.claude/settings.local.json
+.omc/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Java / Maven
+target/
+!.mvn/wrapper/maven-wrapper.jar
+*.class
+*.log
+hs_err_pid*
+
+# Node / Angular
+node_modules/
+dist/
+.angular/
+coverage/
+.nx/
+npm-debug.log*
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# Helm
+charts/*/charts/
+*.tgz
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+
+# Python (skill scripts)
+__pycache__/
+*.pyc
