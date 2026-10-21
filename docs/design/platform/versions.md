@@ -3,7 +3,7 @@
 Platforms the bookstore depends on that need tracking for security patches and upgrades. This is the image, runtime, framework-BOM and operator level, not individual libraries.
 
 - **Checked:** 2026-10-21
-- **Derived from:** `docs/00-conventions.md` … `06-data-platform.md`, `architecture.md`, and the ADRs in `caw-project/docs/adr/`
+- **Derived from:** `docs/00-conventions.md` … `06-data-platform.md`, `architecture.md`, and the ADRs in `docs/adr/`
 - **Source of truth:** the YAML block below. The other sections are summaries of it.
 
 ## How to use this file (for agents)
